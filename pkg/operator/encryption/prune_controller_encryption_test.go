@@ -185,11 +185,13 @@ func TestEncryptionPruneController(t *testing.T) {
 			// note that the informer factory is not used in the test - it's only needed to create the controller
 			kubeInformers := v1helpers.NewKubeInformersForNamespaces(fakeKubeClient, "openshift-config-managed", scenario.targetNamespace)
 			fakeSecretClient := fakeKubeClient.CoreV1()
+			fakePodClient := fakeKubeClient.CoreV1()
 
 			target := newEncryptionPruneController(
 				scenario.targetNamespace,
 				fakeOperatorClient,
 				kubeInformers,
+				fakePodClient,
 				fakeSecretClient,
 				scenario.encryptionSecretSelector,
 				eventRecorder,

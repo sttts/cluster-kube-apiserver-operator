@@ -245,10 +245,11 @@ func TestEncryptionKeyController(t *testing.T) {
 			// note that the informer factory is not used in the test - it's only needed to create the controller
 			kubeInformers := v1helpers.NewKubeInformersForNamespaces(fakeKubeClient, "openshift-config-managed")
 			fakeSecretClient := fakeKubeClient.CoreV1()
+			fakePodClient := fakeKubeClient.CoreV1()
 			fakeConfigClient := configv1clientfake.NewSimpleClientset(&configv1.APIServer{ObjectMeta: metav1.ObjectMeta{Name: "cluster"}})
 			fakeApiServerClient := fakeConfigClient.ConfigV1().APIServers()
 			fakeApiServerInformer := configv1informers.NewSharedInformerFactory(fakeConfigClient, time.Minute).Config().V1().APIServers()
-			target := newEncryptionKeyController(scenario.targetNamespace, fakeOperatorClient, fakeApiServerClient, fakeApiServerInformer, kubeInformers, fakeSecretClient, scenario.encryptionSecretSelector, eventRecorder, scenario.targetGRs)
+			target := newEncryptionKeyController(scenario.targetNamespace, fakeOperatorClient, fakeApiServerClient, fakeApiServerInformer, kubeInformers, fakePodClient, fakeSecretClient, scenario.encryptionSecretSelector, eventRecorder, scenario.targetGRs)
 
 			// act
 			err := target.sync()
