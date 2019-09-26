@@ -130,8 +130,8 @@ func (c *encryptionKeyController) checkAndCreateKeys() error {
 		return err
 	}
 
-	encryptionState, err := getDesiredEncryptionStateFromClients(c.targetNamespace, c.podClient, c.secretClient, c.encryptionSecretSelector, c.encryptedGRs)
-	if err != nil {
+	encryptionState, operandConverged, err := getDesiredEncryptionStateFromClients(c.targetNamespace, c.podClient, c.secretClient, c.encryptionSecretSelector, c.encryptedGRs)
+	if !operandConverged || err != nil {
 		return err
 	}
 

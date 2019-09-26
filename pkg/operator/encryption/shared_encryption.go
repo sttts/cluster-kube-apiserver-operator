@@ -251,18 +251,19 @@ func newIdentityKey() []byte {
 
 var emptyStaticIdentityKey = base64.StdEncoding.EncodeToString(newIdentityKey())
 
-func getDesiredEncryptionStateFromClients(targetNamespace string, podClient corev1client.PodsGetter, secretClient corev1client.SecretsGetter, encryptionSecretSelector metav1.ListOptions, encryptedGRs map[schema.GroupResource]bool) (groupResourcesState, error) {
+func getDesiredEncryptionStateFromClients(targetNamespace string, podClient corev1client.PodsGetter, secretClient corev1client.SecretsGetter, encryptionSecretSelector metav1.ListOptions, encryptedGRs map[schema.GroupResource]bool) (groupResourcesState, bool, error) {
 	revision, err := getAPIServerRevisionOfAllInstances(podClient.Pods(targetNamespace))
 	if len(revision) == 0 || err != nil {
-		return groupResourcesState{}, err
+		return groupResourcesState{}, false, err
 	}
 
 	encryptionConfig, err := getCurrentEncryptionConfig(secretClient.Secrets(targetNamespace), revision)
 	if err != nil {
-		return groupResourcesState{}, utilerrors.FilterOut(err, errors.IsNotFound)
+		return groupResourcesState{}, true, utilerrors.FilterOut(err, errors.IsNotFound)
 	}
 
-	return getDesiredEncryptionState(encryptionConfig, targetNamespace, secretClient.Secrets(operatorclient.GlobalMachineSpecifiedConfigNamespace), encryptionSecretSelector, encryptedGRs)
+	state, err := getDesiredEncryptionState(encryptionConfig, targetNamespace, secretClient.Secrets(operatorclient.GlobalMachineSpecifiedConfigNamespace), encryptionSecretSelector, encryptedGRs)
+	return state, true, err
 }
 
 // getDesiredEncryptionState returns the desired state of encryption for all resources.  To do this it compares the current state
