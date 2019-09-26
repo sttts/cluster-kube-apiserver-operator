@@ -30,10 +30,10 @@ import (
 const encWorkKey = "key"
 
 // encryptionKeyController watches secrets in openshift-config-managed
-// to determine if a new AES-256 bit encryption key should be created.
+// matching encryptionSecretSelector to determine if a new encryption key
+// should be created.
 // It finds the secrets that contain the keys using the encryptionSecretSelector.
-// There are distinct keys for each resource that is encrypted per encryptedGRs.
-// Thus the key rotation of all encrypted resources is independent of other resources.
+//
 // The criteria for a making a new key is as follows:
 //   1. There are no unmigrated keys (see encryptionMigrationController).
 //   2. If all existing keys are migrated, determine when the last migration completed.

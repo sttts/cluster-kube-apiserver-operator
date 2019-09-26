@@ -26,7 +26,7 @@ import (
 func TestEncryptionKeyController(t *testing.T) {
 	scenarios := []struct {
 		name                     string
-		initialSecrets           []runtime.Object
+		initialObjects           []runtime.Object
 		encryptionSecretSelector metav1.ListOptions
 		targetNamespace          string
 		targetGRs                map[schema.GroupResource]bool
@@ -44,7 +44,8 @@ func TestEncryptionKeyController(t *testing.T) {
 				{Group: "", Resource: "secrets"}: true,
 			},
 			targetNamespace: "kms",
-			expectedActions: []string{"list:secrets:openshift-config-managed", "create:secrets:openshift-config-managed"},
+			expectedActions: []string{"list:pods:kms", "get:secrets:kms", "create:secrets:openshift-config-managed"},
+			initialObjects:  []runtime.Object{createDummyKubeAPIPod("kube-apiserver", "kms")},
 			validateFunc: func(ts *testing.T, actions []clientgotesting.Action, targetNamespace string, targetGRs map[schema.GroupResource]bool) {
 				var targetGR schema.GroupResource
 				for targetGR = range targetGRs {
@@ -55,7 +56,7 @@ func TestEncryptionKeyController(t *testing.T) {
 					if action.Matches("create", "secrets") {
 						createAction := action.(clientgotesting.CreateAction)
 						actualSecret := createAction.GetObject().(*corev1.Secret)
-						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, targetGR, 1, actualSecret)
+						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, []schema.GroupResource{targetGR}, 1, actualSecret)
 						if !equality.Semantic.DeepEqual(actualSecret, expectedSecret) {
 							ts.Errorf(diff.ObjectDiff(actualSecret, expectedSecret))
 						}
@@ -78,8 +79,8 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 7, []byte("61def964fb967f5d7c44a2af8dab6865")),
+			initialObjects: []runtime.Object{
+				createEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 7, []byte("61def964fb967f5d7c44a2af8dab6865")),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed"},
@@ -91,8 +92,8 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createMigratedEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 3, []byte("61def964fb967f5d7c44a2af8dab6865")),
+			initialObjects: []runtime.Object{
+				createMigratedEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 3, []byte("61def964fb967f5d7c44a2af8dab6865"), time.Now()),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed"},
@@ -104,8 +105,8 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 5, []byte("61def964fb967f5d7c44a2af8dab6865")),
+			initialObjects: []runtime.Object{
+				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 5, []byte("61def964fb967f5d7c44a2af8dab6865")),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed", "create:secrets:openshift-config-managed"},
@@ -119,7 +120,7 @@ func TestEncryptionKeyController(t *testing.T) {
 					if action.Matches("create", "secrets") {
 						createAction := action.(clientgotesting.CreateAction)
 						actualSecret := createAction.GetObject().(*corev1.Secret)
-						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, targetGR, 6, actualSecret)
+						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, []schema.GroupResource{targetGR}, 6, actualSecret)
 						expectedSecret.Annotations["encryption.operator.openshift.io/internal-reason"] = "timestamp-too-old"
 						if !equality.Semantic.DeepEqual(actualSecret, expectedSecret) {
 							ts.Errorf(diff.ObjectDiff(actualSecret, expectedSecret))
@@ -143,9 +144,9 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 5, []byte("61def964fb967f5d7c44a2af8dab6865")),
-				createEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 6, []byte("61def964fb967f5d7c44a2af8dab6865")),
+			initialObjects: []runtime.Object{
+				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 5, []byte("61def964fb967f5d7c44a2af8dab6865")),
+				createEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 6, []byte("61def964fb967f5d7c44a2af8dab6865")),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed"},
@@ -158,8 +159,8 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 100, []byte("61def964fb967f5d7c44a2af8dab6865")),
+			initialObjects: []runtime.Object{
+				createExpiredMigratedEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 100, []byte("61def964fb967f5d7c44a2af8dab6865")),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed", "create:secrets:openshift-config-managed"},
@@ -173,7 +174,7 @@ func TestEncryptionKeyController(t *testing.T) {
 					if action.Matches("create", "secrets") {
 						createAction := action.(clientgotesting.CreateAction)
 						actualSecret := createAction.GetObject().(*corev1.Secret)
-						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, targetGR, 101, actualSecret)
+						expectedSecret := createEncryptionKeySecretWithKeyFromExistingSecret(targetNamespace, []schema.GroupResource{targetGR}, 101, actualSecret)
 						expectedSecret.Annotations["encryption.operator.openshift.io/internal-reason"] = "timestamp-too-old"
 						if !equality.Semantic.DeepEqual(actualSecret, expectedSecret) {
 							ts.Errorf(diff.ObjectDiff(actualSecret, expectedSecret))
@@ -197,8 +198,8 @@ func TestEncryptionKeyController(t *testing.T) {
 			targetGRs: map[schema.GroupResource]bool{
 				{Group: "", Resource: "secrets"}: true,
 			},
-			initialSecrets: []runtime.Object{
-				createEncryptionKeySecretWithRawKey("kms", schema.GroupResource{Group: "", Resource: "secrets"}, 1, []byte("")),
+			initialObjects: []runtime.Object{
+				createEncryptionKeySecretWithRawKey("kms", []schema.GroupResource{{Group: "", Resource: "secrets"}}, 1, []byte("")),
 			},
 			targetNamespace: "kms",
 			expectedActions: []string{"list:secrets:openshift-config-managed", "create:secrets:openshift-config-managed", "get:secrets:openshift-config-managed"},
@@ -239,11 +240,13 @@ func TestEncryptionKeyController(t *testing.T) {
 				nil,
 				nil,
 			)
-			fakeKubeClient := fake.NewSimpleClientset(scenario.initialSecrets...)
+			fakeKubeClient := fake.NewSimpleClientset(scenario.initialObjects...)
 			eventRecorder := events.NewRecorder(fakeKubeClient.CoreV1().Events(scenario.targetNamespace), "test-encryptionKeyController", &corev1.ObjectReference{})
-			// we pass "openshift-config-managed" ns because the controller creates an informer for secrets in that namespace.
+			// pass informer for
+			// - target namespace: pods and secrets
+			// - openshift-config-managed: secrets
 			// note that the informer factory is not used in the test - it's only needed to create the controller
-			kubeInformers := v1helpers.NewKubeInformersForNamespaces(fakeKubeClient, "openshift-config-managed")
+			kubeInformers := v1helpers.NewKubeInformersForNamespaces(fakeKubeClient, "openshift-config-managed", scenario.targetNamespace)
 			fakeSecretClient := fakeKubeClient.CoreV1()
 			fakePodClient := fakeKubeClient.CoreV1()
 			fakeConfigClient := configv1clientfake.NewSimpleClientset(&configv1.APIServer{ObjectMeta: metav1.ObjectMeta{Name: "cluster"}})

@@ -1,16 +1,14 @@
 package encryption
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,20 +22,14 @@ import (
 const (
 	encryptionSecretKeyDataForTest           = "encryption.operator.openshift.io-key"
 	encryptionConfSecretForTest              = "encryption-config"
-	encryptionSecretReadTimestampForTest     = "encryption.operator.openshift.io/read-timestamp"
-	encryptionSecretWriteTimestampForTest    = "encryption.operator.openshift.io/write-timestamp"
 	encryptionSecretMigratedTimestampForTest = "encryption.operator.openshift.io/migrated-timestamp"
+	encryptionSecretMigratedResourcesForTest = "encryption.operator.openshift.io/migrated-resources"
 )
 
-func createEncryptionKeySecretNoData(targetNS string, gr schema.GroupResource, keyID uint64) *corev1.Secret {
-	group := gr.Group
-	if len(group) == 0 {
-		group = "core"
-	}
-
-	return &corev1.Secret{
+func createEncryptionKeySecretNoData(targetNS string, grs []schema.GroupResource, keyID uint64) *corev1.Secret {
+	s := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-%s-encryption-%d", targetNS, group, gr.Resource, keyID),
+			Name:      fmt.Sprintf("%s-encryption-%d", targetNS, keyID),
 			Namespace: "openshift-config-managed",
 			Annotations: map[string]string{
 				kubernetesDescriptionKey: kubernetesDescriptionScaryValue,
@@ -48,67 +40,45 @@ func createEncryptionKeySecretNoData(targetNS string, gr schema.GroupResource, k
 			},
 			Labels: map[string]string{
 				"encryption.operator.openshift.io/component": targetNS,
-				"encryption.operator.openshift.io/group":     gr.Group,
-				"encryption.operator.openshift.io/resource":  gr.Resource,
 			},
 			Finalizers: []string{"encryption.operator.openshift.io/deletion-protection"},
 		},
 		Data: map[string][]byte{},
 	}
+
+	if len(grs) > 0 {
+		migratedResourceBytes, err := json.Marshal(GroupResources{Resources: grs})
+		if err != nil {
+			panic(err)
+		}
+		s.Annotations[encryptionSecretMigratedResourcesForTest] = string(migratedResourceBytes)
+	}
+
+	return s
 }
 
-func createEncryptionKeySecretWithRawKey(targetNS string, gr schema.GroupResource, keyID uint64, rawKey []byte) *corev1.Secret {
-	secret := createEncryptionKeySecretNoData(targetNS, gr, keyID)
+func createEncryptionKeySecretWithRawKey(targetNS string, grs []schema.GroupResource, keyID uint64, rawKey []byte) *corev1.Secret {
+	secret := createEncryptionKeySecretNoData(targetNS, grs, keyID)
 	secret.Data[encryptionSecretKeyDataForTest] = rawKey
 	return secret
 }
 
-func createEncryptionKeySecretWithKeyFromExistingSecret(targetNS string, gr schema.GroupResource, keyID uint64, existingSecret *corev1.Secret) *corev1.Secret {
-	secret := createEncryptionKeySecretNoData(targetNS, gr, keyID)
+func createEncryptionKeySecretWithKeyFromExistingSecret(targetNS string, grs []schema.GroupResource, keyID uint64, existingSecret *corev1.Secret) *corev1.Secret {
+	secret := createEncryptionKeySecretNoData(targetNS, grs, keyID)
 	if rawKey, exist := existingSecret.Data[encryptionSecretKeyDataForTest]; exist {
 		secret.Data[encryptionSecretKeyDataForTest] = rawKey
 	}
 	return secret
 }
 
-func createReadEncryptionKeySecretWithRawKey(targetNS string, gr schema.GroupResource, keyID uint64, rawKey []byte, timestamp ...string) *corev1.Secret {
-	secret := createEncryptionKeySecretWithRawKey(targetNS, gr, keyID, rawKey)
-	formattedTS := ""
-	if len(timestamp) == 0 {
-		formattedTS = time.Now().Format(time.RFC3339)
-	} else {
-		formattedTS = timestamp[0]
-	}
-	secret.Annotations[encryptionSecretReadTimestampForTest] = formattedTS
+func createMigratedEncryptionKeySecretWithRawKey(targetNS string, grs []schema.GroupResource, keyID uint64, rawKey []byte, ts time.Time) *corev1.Secret {
+	secret := createEncryptionKeySecretWithRawKey(targetNS, grs, keyID, rawKey)
+	secret.Annotations[encryptionSecretMigratedTimestampForTest] = ts.Format(time.RFC3339)
 	return secret
 }
 
-func createWriteEncryptionKeySecretWithRawKey(targetNS string, gr schema.GroupResource, keyID uint64, rawKey []byte, timestamp ...string) *corev1.Secret {
-	secret := createReadEncryptionKeySecretWithRawKey(targetNS, gr, keyID, rawKey, timestamp...)
-	formattedTS := ""
-	if len(timestamp) == 0 {
-		formattedTS = time.Now().Format(time.RFC3339)
-	} else {
-		formattedTS = timestamp[0]
-	}
-	secret.Annotations[encryptionSecretWriteTimestampForTest] = formattedTS
-	return secret
-}
-
-func createMigratedEncryptionKeySecretWithRawKey(targetNS string, gr schema.GroupResource, keyID uint64, rawKey []byte, timestamp ...string) *corev1.Secret {
-	secret := createWriteEncryptionKeySecretWithRawKey(targetNS, gr, keyID, rawKey, timestamp...)
-	formattedTS := ""
-	if len(timestamp) == 0 {
-		formattedTS = time.Now().Format(time.RFC3339)
-	} else {
-		formattedTS = timestamp[0]
-	}
-	secret.Annotations[encryptionSecretMigratedTimestampForTest] = formattedTS
-	return secret
-}
-
-func createExpiredMigratedEncryptionKeySecretWithRawKey(targetNS string, gr schema.GroupResource, keyID uint64, rawKey []byte) *corev1.Secret {
-	return createMigratedEncryptionKeySecretWithRawKey(targetNS, gr, keyID, rawKey, time.Now().Add(time.Minute*35*-1).Format(time.RFC3339))
+func createExpiredMigratedEncryptionKeySecretWithRawKey(targetNS string, grs []schema.GroupResource, keyID uint64, rawKey []byte) *corev1.Secret {
+	return createMigratedEncryptionKeySecretWithRawKey(targetNS, grs, keyID, rawKey, time.Now().Add(time.Minute*35*-1))
 }
 
 func createDummyKubeAPIPod(name, namespace string) *corev1.Pod {
@@ -159,56 +129,26 @@ func secretDataToEncryptionConfig(secret *corev1.Secret) (*apiserverconfigv1.Enc
 
 func validateActionsVerbs(actualActions []clientgotesting.Action, expectedActions []string) error {
 	if len(actualActions) != len(expectedActions) {
-		return fmt.Errorf("expected to get %d actions but got %d", len(expectedActions), len(actualActions))
+		return fmt.Errorf("expected to get %d actions but got %d, got=%v, expected=%v", len(expectedActions), len(actualActions), actionStrings(actualActions), expectedActions)
 	}
-	for index, actualAction := range actualActions {
-		actualActionVerb := actualAction.GetVerb()
-		actualActionRes := actualAction.GetResource().Resource
-		actualActionNs := actualAction.GetNamespace()
-
-		expectedAction := expectedActions[index]
-		expectedActionVerRes := strings.Split(expectedAction, ":")
-		if len(expectedActionVerRes) < 3 {
-			return fmt.Errorf("cannot verify the action %q at position %d because it has an incorrect format, must be \"verb:resource:namespace\"", expectedAction, index)
-		}
-		expectedActionVerb := expectedActionVerRes[0]
-		expectedActionRes := expectedActionVerRes[1]
-		expectedActionNs := expectedActionVerRes[2]
-		expectedActionNameRegPattern := ""
-		if len(expectedActionVerRes) > 3 {
-			expectedActionNameRegPattern = expectedActionVerRes[3]
-		}
-
-		if actualActionVerb != expectedActionVerb {
-			return fmt.Errorf("expected %q verb at position %d but got %q, for %q action", expectedActionVerb, index, actualActionVerb, expectedAction)
-		}
-		if actualActionRes != expectedActionRes {
-			return fmt.Errorf("expected %q resource at position %d but got %q, for %q action", expectedActionRes, index, actualActionRes, expectedAction)
-		}
-		if actualActionNs != expectedActionNs {
-			return fmt.Errorf("expected %q namespace at position %d but got %q, for %q action", expectedActionNs, index, actualActionNs, expectedAction)
-		}
-		if len(expectedActionNameRegPattern) > 0 && !regexp.MustCompile(expectedActionNameRegPattern).MatchString(getResourceNameBasedOnActionVerb(actualAction)) {
-			return fmt.Errorf("expected a resource with name %q at position %d but got %s, for %q action", expectedActionNameRegPattern, index, getResourceNameBasedOnActionVerb(actualAction), expectedAction)
+	for i, a := range actualActions {
+		if got, expected := actionString(a), expectedActions[i]; got != expected {
+			return fmt.Errorf("at %d got %s, expected %s", i, got, expected)
 		}
 	}
 	return nil
 }
 
-func getResourceNameBasedOnActionVerb(action clientgotesting.Action) string {
-	switch action.GetVerb() {
-	case "get":
-		return action.(clientgotesting.GetAction).GetName()
-	case "delete":
-		return action.(clientgotesting.DeleteAction).GetName()
-	case "update":
-		actionMeta, err := meta.Accessor(action.(clientgotesting.UpdateAction).GetObject())
-		if err != nil {
-			return err.Error()
-		}
-		return actionMeta.GetName()
+func actionString(a clientgotesting.Action) string {
+	return a.GetVerb() + ":" + a.GetResource().Resource + ":" + a.GetNamespace()
+}
+
+func actionStrings(actions []clientgotesting.Action) []string {
+	res := make([]string, 0, len(actions))
+	for _, a := range actions {
+		res = append(res, actionString(a))
 	}
-	return fmt.Sprintf("cannot get a name of the resource from an unsupported action verb %q", action.GetVerb())
+	return res
 }
 
 func createEncryptionCfgNoWriteKey(keyID string, keyBase64 string, resources ...string) *apiserverconfigv1.EncryptionConfiguration {
