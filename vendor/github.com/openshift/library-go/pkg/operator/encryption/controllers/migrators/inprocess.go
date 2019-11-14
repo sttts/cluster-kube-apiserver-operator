@@ -151,7 +151,7 @@ func (m *InProcessMigrator) runMigration(gvr schema.GroupVersionResource, writeK
 			for _, obj := range allResource.Items { // TODO parallelize for-loop
 				for {
 					_, updateErr := d.Namespace(obj.GetNamespace()).Update(&obj, metav1.UpdateOptions{})
-					if updateErr == nil || errors.IsNotFound(updateErr) || errors.IsConflict(err) {
+					if updateErr == nil || errors.IsNotFound(updateErr) || errors.IsConflict(updateErr) {
 						continue nextItem
 					}
 					if retryable := canRetry(updateErr); retryable == nil || *retryable == false {
